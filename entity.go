@@ -70,8 +70,17 @@ type EntityDefiner interface {
 //
 func (ent *Entity) Get(db *sql.DB) error {
 	q := "SELECT %s FROM %s WHERE %s=?"
-	q = fmt.Sprintf(q, strings.Join(ent.names(true), ","), ent.Name, ent.Key.Name)
-	return QueryRow(db, q, ent.scan, ent.Key.Value)
+	fields := ent.Fields
+	names := make([]string, len(fields))
+	values := make([]interface{}, len(fields))
+	for i, f := range fields {
+		names[i] = f.Name
+		values[i] = f.Value
+	}
+	q = fmt.Sprintf(q, strings.Join(names, ","), ent.Name, ent.Key.Name)
+	return QueryRow(db, q, func(row *sql.Row) error {
+		return row.Scan(values...)
+	}, ent.Key.Value)
 }
 
 // Insert executes an insert statement on a single row of data using the
@@ -88,8 +97,22 @@ func (ent *Entity) Get(db *sql.DB) error {
 //
 func (ent *Entity) Insert(db *sql.DB) (int64, error) {
 	q := "INSERT INTO %s(%s) VALUES (%s)"
-	names := ent.names(false)
-	values := ent.values(false)
+	fields := ent.Fields
+	names := []string{}
+	values := []interface{}{}
+
+	if ent.Key.NonIncrementing {
+		names = append(names, ent.Key.Name)
+		values = append(values, ent.Key.Value)
+	}
+
+	for _, f := range fields {
+		if !f.ReadOnly {
+			names = append(names, f.Name)
+			values = append(values, f.Value)
+		}
+	}
+
 	columns := strings.Join(names, ",")
 	params := strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")
 	s := fmt.Sprintf(q, ent.Name, columns, params)
@@ -116,8 +139,24 @@ func (ent *Entity) Insert(db *sql.DB) (int64, error) {
 // 		}
 //
 func (ent *Entity) Update(db *sql.DB) error {
-	sets := ent.sets()
-	values := append(ent.values(false), ent.Key.Value)
+	fields := ent.Fields
+	sets := []string{}
+	values := []interface{}{}
+
+	if ent.Key.NonIncrementing {
+		sets = append(sets, fmt.Sprintf("%s=?", ent.Key.Name))
+		values = append(values, ent.Key.Value)
+	}
+
+	for _, f := range fields {
+		if !f.ReadOnly {
+			sets = append(sets, fmt.Sprintf("%s=?", f.Name))
+			values = append(values, f.Value)
+		}
+	}
+
+	values = append(values, ent.Key.Value)
+
 	q := "UPDATE %s SET %s WHERE %s = ?"
 	q = fmt.Sprintf(q, ent.Name, strings.Join(sets, ","), ent.Key.Name)
 	return Exec(db, q, values...)
@@ -138,62 +177,4 @@ func (ent *Entity) Update(db *sql.DB) error {
 func (ent *Entity) Delete(db *sql.DB) error {
 	q := fmt.Sprintf("DELETE FROM %s WHERE %s=?", ent.Name, ent.Key.Name)
 	return Exec(db, q, ent.Key.Value)
-}
-
-// The names func returns a slice of strings with the names of the fields
-// in the receiver. If NonIncrementing is set to true for the receivers Key,
-// the Key name will be included in this array. If includesReadOnly is true,
-// fields with ReadOnly set to true will be included.
-func (ent *Entity) names(includeReadOnly bool) []string {
-	a := []string{}
-	if ent.Key.NonIncrementing {
-		a = append(a, ent.Key.Name)
-	}
-	for _, c := range ent.Fields {
-		if includeReadOnly || !c.ReadOnly {
-			a = append(a, c.Name)
-		}
-	}
-	return a
-}
-
-// The values func returns a slice of strings with the value pointers of the fields
-// in the receiver. If NonIncrementing is set to true for the receivers Key,
-// the Key value will be included in this array. If includesReadOnly is true,
-// fields with ReadOnly set to true will be included.
-func (ent *Entity) values(includeReadOnly bool) []interface{} {
-	a := []interface{}{}
-	if ent.Key.NonIncrementing {
-		a = append(a, ent.Key.Value)
-	}
-	for _, c := range ent.Fields {
-		if includeReadOnly || !c.ReadOnly {
-			a = append(a, c.Value)
-		}
-	}
-	return a
-}
-
-// The sets func is similar to the names func, in that it returns a slice
-// of strings. However, sets func is used to generate update grammar for each
-// field in the receiver. Both the field name and value pointer are evaluated.
-// If NonIncrementing is set to true for the receivers Key, the Key will
-// be included in this array.
-func (ent *Entity) sets() []string {
-	a := []string{}
-	if ent.Key.NonIncrementing {
-		a = append(a, fmt.Sprintf("%s=?", ent.Key.Name))
-	}
-	for _, c := range ent.Fields {
-		if !c.ReadOnly {
-			a = append(a, fmt.Sprintf("%s=?", c.Name))
-		}
-	}
-	return a
-}
-
-// The scan func simply scans a row of data into the value pointers of the
-// receiver.
-func (ent *Entity) scan(row *sql.Row) error {
-	return row.Scan(ent.values(true)...)
 }
