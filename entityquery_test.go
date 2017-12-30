@@ -56,7 +56,7 @@ func TestCollectionSelect(t *testing.T) {
 		t.Error("Number of customers in test.com domain should be 3.")
 	}
 
-	b, err := json.Marshal(test)
+	_, err = json.Marshal(test)
 	if err != nil {
 		t.Error(err)
 		return
