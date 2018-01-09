@@ -4,7 +4,6 @@
 package entigo
 
 import (
-	"encoding/json"
 	"testing"
 	"time"
 )
@@ -45,8 +44,9 @@ func TestCollectionSelect(t *testing.T) {
 		}
 	}
 
-	query := EntityCollection(func() EntityDefiner { return &Customer{} })
-	test, err := query.Select(db, "WHERE email LIKE '%@test.com'")
+	collection := EntityCollection(func() EntityDefiner { return &Customer{} })
+
+	test, err := collection.Select(db, "WHERE email LIKE '%@test.com'")
 	if err != nil {
 		t.Error(err)
 		return
@@ -56,10 +56,14 @@ func TestCollectionSelect(t *testing.T) {
 		t.Error("Number of customers in test.com domain should be 3.")
 	}
 
-	_, err = json.Marshal(test)
+	test, err = collection.Select(db, "WHERE email = ?", "john+4@other.com")
 	if err != nil {
 		t.Error(err)
 		return
+	}
+
+	if len(test) != 1 {
+		t.Error("Should have one row")
 	}
 
 }

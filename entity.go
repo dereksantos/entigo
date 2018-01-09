@@ -49,18 +49,32 @@ type EntityDefiner interface {
 // 		err := person.Entity().Get()
 //
 func (ent *Entity) Get(db *sql.DB) error {
-	q := "SELECT %s FROM %s WHERE %s=?"
+	clause := fmt.Sprintf("%s=?", ent.Key.Name)
+	return ent.Where(db, clause, ent.Key.Value)
+}
+
+// Where scans a single row of data using the specified sql clause
+// into the Entity's value pointers.
+//
+// Example:
+// 		person := &Person{}
+// 		err := person.Entity().Where(db, "email = ?", "john@test.com")
+//
+func (ent *Entity) Where(db *sql.DB, clause string, args ...interface{}) error {
+	q := "SELECT %s FROM %s WHERE %s"
 	fields := ent.Fields
-	names := make([]string, len(fields))
-	values := make([]interface{}, len(fields))
+	names := make([]string, len(fields)+1)
+	values := make([]interface{}, len(fields)+1)
+	names[0] = ent.Key.Name
+	values[0] = ent.Key.Value
 	for i, f := range fields {
-		names[i] = f.Name
-		values[i] = f.Value
+		names[i+1] = f.Name
+		values[i+1] = f.Value
 	}
-	q = fmt.Sprintf(q, strings.Join(names, ","), ent.Name, ent.Key.Name)
+	q = fmt.Sprintf(q, strings.Join(names, ","), ent.Name, clause)
 	return QueryRow(db, q, func(row *sql.Row) error {
 		return row.Scan(values...)
-	}, ent.Key.Value)
+	}, args...)
 }
 
 // Insert executes an insert statement on a single row of data using the
