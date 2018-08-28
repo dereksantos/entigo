@@ -1,26 +1,6 @@
-/*
-MIT License
-
-Copyright (c) 2017 Derek Santos
-
-Permission is hereby granted, free of charge, to any person obtaining a copy
-of this software and associated documentation files (the "Software"), to deal
-in the Software without restriction, including without limitation the rights
-to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
-copies of the Software, and to permit persons to whom the Software is
-furnished to do so, subject to the following conditions:
-
-The above copyright notice and this permission notice shall be included in all
-copies or substantial portions of the Software.
-
-THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
-IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
-FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
-AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
-LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
-OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
-SOFTWARE.
-*/
+// Copyright (c) 2017 Derek Santos. All rights reserved.
+// Use of this source code is governed by a MIT-style license that can be found
+// in the LICENSE file.
 package entigo
 
 import (
@@ -69,9 +49,32 @@ type EntityDefiner interface {
 // 		err := person.Entity().Get()
 //
 func (ent *Entity) Get(db *sql.DB) error {
-	q := "SELECT %s FROM %s WHERE %s=?"
-	q = fmt.Sprintf(q, strings.Join(ent.names(true), ","), ent.Name, ent.Key.Name)
-	return QueryRow(db, q, ent.scan, ent.Key.Value)
+	clause := fmt.Sprintf("%s=?", ent.Key.Name)
+	return ent.Where(db, clause, ent.Key.Value)
+}
+
+// Where scans a single row of data using the specified sql clause
+// into the Entity's value pointers.
+//
+// Example:
+// 		person := &Person{}
+// 		err := person.Entity().Where(db, "email = ?", "john@test.com")
+//
+func (ent *Entity) Where(db *sql.DB, clause string, args ...interface{}) error {
+	q := "SELECT %s FROM %s WHERE %s"
+	fields := ent.Fields
+	names := make([]string, len(fields)+1)
+	values := make([]interface{}, len(fields)+1)
+	names[0] = ent.Key.Name
+	values[0] = ent.Key.Value
+	for i, f := range fields {
+		names[i+1] = f.Name
+		values[i+1] = f.Value
+	}
+	q = fmt.Sprintf(q, strings.Join(names, ","), ent.Name, clause)
+	return QueryRow(db, q, func(row *sql.Row) error {
+		return row.Scan(values...)
+	}, args...)
 }
 
 // Insert executes an insert statement on a single row of data using the
@@ -88,8 +91,22 @@ func (ent *Entity) Get(db *sql.DB) error {
 //
 func (ent *Entity) Insert(db *sql.DB) (int64, error) {
 	q := "INSERT INTO %s(%s) VALUES (%s)"
-	names := ent.names(false)
-	values := ent.values(false)
+	fields := ent.Fields
+	names := []string{}
+	values := []interface{}{}
+
+	if ent.Key.NonIncrementing {
+		names = append(names, ent.Key.Name)
+		values = append(values, ent.Key.Value)
+	}
+
+	for _, f := range fields {
+		if !f.ReadOnly {
+			names = append(names, f.Name)
+			values = append(values, f.Value)
+		}
+	}
+
 	columns := strings.Join(names, ",")
 	params := strings.TrimSuffix(strings.Repeat("?,", len(names)), ",")
 	s := fmt.Sprintf(q, ent.Name, columns, params)
@@ -116,8 +133,24 @@ func (ent *Entity) Insert(db *sql.DB) (int64, error) {
 // 		}
 //
 func (ent *Entity) Update(db *sql.DB) error {
-	sets := ent.sets()
-	values := append(ent.values(false), ent.Key.Value)
+	fields := ent.Fields
+	sets := []string{}
+	values := []interface{}{}
+
+	if ent.Key.NonIncrementing {
+		sets = append(sets, fmt.Sprintf("%s=?", ent.Key.Name))
+		values = append(values, ent.Key.Value)
+	}
+
+	for _, f := range fields {
+		if !f.ReadOnly {
+			sets = append(sets, fmt.Sprintf("%s=?", f.Name))
+			values = append(values, f.Value)
+		}
+	}
+
+	values = append(values, ent.Key.Value)
+
 	q := "UPDATE %s SET %s WHERE %s = ?"
 	q = fmt.Sprintf(q, ent.Name, strings.Join(sets, ","), ent.Key.Name)
 	return Exec(db, q, values...)
@@ -138,62 +171,4 @@ func (ent *Entity) Update(db *sql.DB) error {
 func (ent *Entity) Delete(db *sql.DB) error {
 	q := fmt.Sprintf("DELETE FROM %s WHERE %s=?", ent.Name, ent.Key.Name)
 	return Exec(db, q, ent.Key.Value)
-}
-
-// The names func returns a slice of strings with the names of the fields
-// in the receiver. If NonIncrementing is set to true for the receivers Key,
-// the Key name will be included in this array. If includesReadOnly is true,
-// fields with ReadOnly set to true will be included.
-func (ent *Entity) names(includeReadOnly bool) []string {
-	a := []string{}
-	if ent.Key.NonIncrementing {
-		a = append(a, ent.Key.Name)
-	}
-	for _, c := range ent.Fields {
-		if includeReadOnly || !c.ReadOnly {
-			a = append(a, c.Name)
-		}
-	}
-	return a
-}
-
-// The values func returns a slice of strings with the value pointers of the fields
-// in the receiver. If NonIncrementing is set to true for the receivers Key,
-// the Key value will be included in this array. If includesReadOnly is true,
-// fields with ReadOnly set to true will be included.
-func (ent *Entity) values(includeReadOnly bool) []interface{} {
-	a := []interface{}{}
-	if ent.Key.NonIncrementing {
-		a = append(a, ent.Key.Value)
-	}
-	for _, c := range ent.Fields {
-		if includeReadOnly || !c.ReadOnly {
-			a = append(a, c.Value)
-		}
-	}
-	return a
-}
-
-// The sets func is similar to the names func, in that it returns a slice
-// of strings. However, sets func is used to generate update grammar for each
-// field in the receiver. Both the field name and value pointer are evaluated.
-// If NonIncrementing is set to true for the receivers Key, the Key will
-// be included in this array.
-func (ent *Entity) sets() []string {
-	a := []string{}
-	if ent.Key.NonIncrementing {
-		a = append(a, fmt.Sprintf("%s=?", ent.Key.Name))
-	}
-	for _, c := range ent.Fields {
-		if !c.ReadOnly {
-			a = append(a, fmt.Sprintf("%s=?", c.Name))
-		}
-	}
-	return a
-}
-
-// The scan func simply scans a row of data into the value pointers of the
-// receiver.
-func (ent *Entity) scan(row *sql.Row) error {
-	return row.Scan(ent.values(true)...)
 }
