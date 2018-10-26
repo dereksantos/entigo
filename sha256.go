@@ -19,9 +19,14 @@ func (g *Sha256) Hash() {
 }
 
 func (p *Sha256) Scan(value interface{}) error {
-	v, ok := value.(string)
+	s, ok := value.(string)
 	if ok {
-		*p = Sha256(v)
+		*p = Sha256(s)
+		return nil
+	}
+	i, ok := value.([]uint8)
+	if ok {
+		*p = Sha256(string(i))
 		return nil
 	}
 	return fmt.Errorf("Can't convert %T to *entity.Sha256", value)

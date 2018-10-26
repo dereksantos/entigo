@@ -20,7 +20,6 @@ func (c EntityCollection) Select(db *sql.DB, clause string, args ...interface{})
 	}
 
 	query := fmt.Sprintf("SELECT %s FROM %s %s", strings.Join(names, ","), e.Name, clause)
-
 	entities := []EntityDefiner{}
 	err := QueryRows(db, query, func(rows *sql.Rows) error {
 		def := c()

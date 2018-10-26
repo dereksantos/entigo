@@ -38,6 +38,11 @@ func (p *Password) Scan(value interface{}) error {
 		*p = Password(v)
 		return nil
 	}
+	i, ok := value.([]uint8)
+	if ok {
+		*p = Password(string(i))
+		return nil
+	}
 	return fmt.Errorf("Can't convert %T to *entity.Password", value)
 }
 

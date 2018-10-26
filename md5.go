@@ -24,6 +24,11 @@ func (p *MD5) Scan(value interface{}) error {
 		*p = MD5(v)
 		return nil
 	}
+	i, ok := value.([]uint8)
+	if ok {
+		*p = MD5(string(i))
+		return nil
+	}
 	return fmt.Errorf("Can't convert %T to *entity.MD5", value)
 }
 
